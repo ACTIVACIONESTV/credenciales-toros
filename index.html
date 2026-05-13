@@ -71,16 +71,28 @@
 </div>
 <div class="acciones">
   <button class="btn-imprimir" onclick="window.print()">🖨️ Imprimir / Guardar PDF</button>
+  <button class="btn-limpiar" onclick="sincronizar()" style="flex:0 0 60px;background:#1d4e89">☁️</button>
   <button class="btn-limpiar" onclick="limpiarTodo()">🗑️ Limpiar Todo</button>
 </div>
 <div class="contador">Jugadores registrados: <span id="conteo">0</span></div>
-<div class="guardado-badge" id="guardado-badge">✅ Guardado en este dispositivo</div>
+<div class="guardado-badge" id="guardado-badge">⏳ Iniciando...</div>
 <div id="hojas-container"></div>
 
 <script>
+/* ============================================================
+ *  CONFIGURACION DE LA NUBE (Google Apps Script)
+ *  - Sigue las instrucciones de apps_script_credenciales.gs
+ *  - Cuando tengas la URL "/exec", pegala aqui entre las comillas.
+ *  - Si CLOUD_URL queda vacio, todo sigue funcionando local
+ *    (modo offline en este dispositivo).
+ * ============================================================ */
+const CLOUD_URL = 'https://script.google.com/macros/s/AKfycbwiVemxkaAoPGiuXvrzlk897_1nNv9Ems9kUR9g4_Y_HGdmyLXUx8XxGnhwEm2cPd_u/exec';
+
+const SYNC_MS = 15000;  // refresco automatico cada 15 segundos
 const STORAGE_KEY = 'credenciales_toros_2025_v4';
 let jugadores = [];
 let fotoDataUrl = null;
+let syncTimer = null;
 
 const TMPL_W = 1275, TMPL_H = 1650;
 // La plantilla NO es uniforme: el slot 1 (arriba-izquierda) esta corrido 34 px
@@ -199,25 +211,101 @@ async function renderTodo() {
   }
 }
 
-function agregarJugador() {
+/* =================== NUBE (Google Apps Script) =================== */
+const isCloud = () => !!(CLOUD_URL && CLOUD_URL.trim());
+
+function setBadge(text, color) {
+  const b = document.getElementById('guardado-badge');
+  b.textContent = text;
+  b.style.color = color || '#4caf50';
+  b.classList.add('visible');
+  clearTimeout(b._t);
+  b._t = setTimeout(() => b.classList.remove('visible'), 2500);
+}
+
+async function cloudFetch(payload) {
+  // POST con content-type "text/plain" para evitar preflight CORS.
+  const res = await fetch(CLOUD_URL, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error('HTTP ' + res.status);
+  return res.json();
+}
+
+async function cloudGet() {
+  const res = await fetch(CLOUD_URL);
+  if (!res.ok) throw new Error('HTTP ' + res.status);
+  return res.json();
+}
+
+async function sincronizar() {
+  if (!isCloud()) return;
+  try {
+    const data = await cloudGet();
+    if (Array.isArray(data.jugadores)) {
+      jugadores = data.jugadores;
+      renderTodo();
+      actualizarConteo();
+    }
+  } catch (e) {
+    setBadge('⚠️ Sin conexión a la nube', '#e63946');
+  }
+}
+
+/* =================== ACCIONES =================== */
+async function agregarJugador() {
   const nombre = document.getElementById('inp-nombre').value.trim();
   if (!nombre) { alert('Escribe el nombre del jugador.'); return; }
   if (!fotoDataUrl) { alert('Selecciona una foto.'); return; }
-  jugadores.push({ nombre, foto: fotoDataUrl });
-  guardar(); renderTodo(); actualizarConteo(); limpiarForm();
+  const jugador = {
+    id: (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random()),
+    nombre, foto: fotoDataUrl,
+  };
+  if (isCloud()) {
+    try {
+      setBadge('⏳ Guardando en la nube...', '#888');
+      const data = await cloudFetch({ action: 'add', jugador });
+      jugadores = data.jugadores || [];
+      setBadge('☁️ Guardado en la nube');
+    } catch (e) {
+      setBadge('⚠️ Sin conexión: guardado solo local', '#e63946');
+      jugadores.push(jugador);
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(jugadores));
+    }
+  } else {
+    jugadores.push(jugador);
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(jugadores));
+    setBadge('✅ Guardado en este dispositivo');
+  }
+  renderTodo(); actualizarConteo(); limpiarForm();
 }
 
-function eliminarJugador(idx) {
-  if (!confirm('¿Eliminar a ' + jugadores[idx].nombre + '?')) return;
-  jugadores.splice(idx, 1);
-  guardar(); renderTodo(); actualizarConteo();
+async function eliminarJugador(idx) {
+  const j = jugadores[idx];
+  if (!j || !confirm('¿Eliminar a ' + j.nombre + '?')) return;
+  if (isCloud() && j.id) {
+    try {
+      setBadge('⏳ Borrando en la nube...', '#888');
+      const data = await cloudFetch({ action: 'delete', id: j.id });
+      jugadores = data.jugadores || [];
+      setBadge('☁️ Sincronizado');
+    } catch (e) {
+      setBadge('⚠️ Sin conexión: borrado solo local', '#e63946');
+      jugadores.splice(idx, 1);
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(jugadores));
+    }
+  } else {
+    jugadores.splice(idx, 1);
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(jugadores));
+  }
+  renderTodo(); actualizarConteo();
 }
 
+// Compatibilidad: se mantiene la antigua funcion guardar() por si la llama algo.
 function guardar() {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(jugadores));
-  const b = document.getElementById('guardado-badge');
-  b.classList.add('visible');
-  setTimeout(() => b.classList.remove('visible'), 2000);
+  setBadge(isCloud() ? '☁️ Guardado en la nube' : '✅ Guardado en este dispositivo');
 }
 
 function actualizarConteo() {
@@ -233,9 +321,23 @@ function limpiarForm() {
   document.getElementById('foto-txt').textContent = 'Toca para seleccionar foto';
 }
 
-function limpiarTodo() {
+async function limpiarTodo() {
   if (!confirm('¿Eliminar TODOS los jugadores?')) return;
-  jugadores = []; guardar(); renderTodo(); actualizarConteo(); limpiarForm();
+  if (isCloud()) {
+    try {
+      setBadge('⏳ Limpiando nube...', '#888');
+      const data = await cloudFetch({ action: 'clear' });
+      jugadores = data.jugadores || [];
+      setBadge('☁️ Lista vaciada en la nube');
+    } catch (e) {
+      setBadge('⚠️ Sin conexión a la nube', '#e63946');
+      return;
+    }
+  } else {
+    jugadores = [];
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(jugadores));
+  }
+  renderTodo(); actualizarConteo(); limpiarForm();
 }
 
 function redimensionar(dataUrl, callback) {
@@ -268,11 +370,42 @@ function previewFoto(input) {
   reader.readAsDataURL(input.files[0]);
 }
 
-function init() {
-  const saved = localStorage.getItem(STORAGE_KEY);
-  if (saved) { try { jugadores = JSON.parse(saved); } catch(e) {} }
+async function init() {
+  if (isCloud()) {
+    setBadge('☁️ Conectando con la nube...', '#888');
+    try {
+      const data = await cloudGet();
+      jugadores = Array.isArray(data.jugadores) ? data.jugadores : [];
+      // Migracion una sola vez: si hay datos locales sin id y la nube esta vacia,
+      // subirlos.
+      const saved = localStorage.getItem(STORAGE_KEY);
+      const migrado = localStorage.getItem(STORAGE_KEY + '_migrado');
+      if (!migrado && saved && jugadores.length === 0) {
+        try {
+          const local = JSON.parse(saved);
+          if (Array.isArray(local) && local.length) {
+            const data2 = await cloudFetch({ action: 'replace', jugadores: local });
+            jugadores = data2.jugadores || [];
+            setBadge('☁️ Datos locales subidos a la nube');
+          }
+        } catch (e) {}
+      }
+      localStorage.setItem(STORAGE_KEY + '_migrado', '1');
+      setBadge('☁️ Conectado a la nube');
+      // Refresco periodico
+      if (syncTimer) clearInterval(syncTimer);
+      syncTimer = setInterval(sincronizar, SYNC_MS);
+    } catch (e) {
+      setBadge('⚠️ Sin conexión - usando modo local', '#e63946');
+      const saved = localStorage.getItem(STORAGE_KEY);
+      if (saved) { try { jugadores = JSON.parse(saved); } catch(e) {} }
+    }
+  } else {
+    const saved = localStorage.getItem(STORAGE_KEY);
+    if (saved) { try { jugadores = JSON.parse(saved); } catch(e) {} }
+  }
   actualizarConteo();
-  // renderTodo se llama cuando tmplImg cargue
+  if (tmplLista) renderTodo();
 }
 
 init();
