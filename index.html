@@ -83,9 +83,21 @@ let jugadores = [];
 let fotoDataUrl = null;
 
 const TMPL_W = 1275, TMPL_H = 1650;
-const CARD_W = TMPL_W / 2;
-const CARD_H = TMPL_H / 4;
-const PHOTO = { x:476, y:119, w:159, h:192 };
+// La plantilla NO es uniforme: el slot 1 (arriba-izquierda) esta corrido 34 px
+// a la derecha respecto a los slots 3, 5, 7. Usamos coordenadas absolutas
+// por slot medidas directamente sobre la imagen.
+const SLOTS = [
+  { ox:  34, oy:    0 }, // 1  col 0 row 0  (esquina sup-izq, corrida +34)
+  { ox: 622, oy:    0 }, // 2  col 1 row 0
+  { ox:   0, oy:  402 }, // 3  col 0 row 1
+  { ox: 622, oy:  402 }, // 4  col 1 row 1
+  { ox:   0, oy:  805 }, // 5  col 0 row 2
+  { ox: 622, oy:  805 }, // 6  col 1 row 2
+  { ox:   0, oy: 1208 }, // 7  col 0 row 3
+  { ox: 622, oy: 1208 }, // 8  col 1 row 3
+];
+const CARD_W = 587;   // ancho aprox. de la tarjeta para el boton X
+const PHOTO = { x:438, y:117, w:164, h:195 };
 const TEXT_X = 155;
 const LINES = [181, 226, 266, 303, 340];
 
@@ -120,11 +132,9 @@ async function dibujarHoja(canvas, slice) {
   slice.forEach((j, s) => {
     if (!j) return;
 
-    // Offset exacto de este slot
-    const col = s % 2;
-    const row = Math.floor(s / 2);
-    const ox = col * CARD_W;
-    const oy = row * CARD_H;
+    // Offset exacto de este slot (coordenadas absolutas por slot)
+    const ox = SLOTS[s].ox;
+    const oy = SLOTS[s].oy;
 
     // Texto
     ctx.font = `bold 13px Arial`;
@@ -173,10 +183,8 @@ async function renderTodo() {
     delLayer.className = 'del-btns';
     slice.forEach((j, s) => {
       if (!j) return;
-      const col = s % 2;
-      const row = Math.floor(s / 2);
-      const ox = col * CARD_W;
-      const oy = row * CARD_H;
+      const ox = SLOTS[s].ox;
+      const oy = SLOTS[s].oy;
       const globalIdx = h*8 + s;
       const btn = document.createElement('button');
       btn.className = 'btn-del';
