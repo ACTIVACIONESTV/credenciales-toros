@@ -152,6 +152,11 @@ async function dibujarHoja(canvas, slice) {
     ctx.font = `bold 13px Arial`;
     ctx.fillStyle = '#000';
     const maxTW = PHOTO.x - TEXT_X - 5;
+    ['Toros','3C','Nocturno','Varonil'].forEach((v, i) => {
+      ctx.fillText(i === 0 ? j.nombre : v, ox + TEXT_X, oy + LINES[i === 0 ? 0 : i], maxTW);
+    });
+   
+    // Reescribir con valores correctos
     const valores = [j.nombre, 'Toros', '3C', 'Nocturno', 'Varonil'];
     LINES.forEach((ly, i) => {
       ctx.fillText(valores[i], ox + TEXT_X, oy + ly, maxTW);
